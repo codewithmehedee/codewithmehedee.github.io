@@ -90,6 +90,7 @@
   }
 
   .nav-links a:hover { color: var(--accent); }
+  .nav-links a.active-link { color: var(--accent); font-weight: bold; }
 
   /* ── HERO ── */
   .hero {
@@ -245,9 +246,7 @@
     gap: 24px;
   }
 
-  .stat {
-    text-align: center;
-  }
+  .stat { text-align: center; }
 
   .stat-num {
     font-family: 'Syne', sans-serif;
@@ -326,10 +325,7 @@
 
   .skill-card:hover::before { opacity: 1; }
 
-  .skill-icon {
-    font-size: 32px;
-    margin-bottom: 16px;
-  }
+  .skill-icon { font-size: 32px; margin-bottom: 16px; }
 
   .skill-card h3 {
     font-family: 'Syne', sans-serif;
@@ -691,6 +687,22 @@
   }
 
   footer span { color: var(--accent); }
+  
+  .footer-links {
+    margin-top: 12px;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+  }
+
+  .footer-links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+    transition: color 0.3s;
+  }
+
+  .footer-links a:hover { color: var(--accent); }
 
   /* ── ANIMATIONS ── */
   @keyframes fadeUp {
@@ -735,6 +747,7 @@
     <li><a href="#experience">Experience</a></li>
     <li><a href="#education">Education</a></li>
     <li><a href="#contact">Contact</a></li>
+    <li><a href="/blog.html" class="active-link">Blog 🚀</a></li>
   </ul>
 </nav>
 
@@ -754,6 +767,9 @@
       <div class="hero-cta">
         <a href="mailto:mehedee225@gmail.com" class="btn-primary">
           ✉ Hire Me
+        </a>
+        <a href="/blog.html" class="btn-outline">
+          📝 Read Blog
         </a>
         <a href="https://github.com/codewithmehedee" target="_blank" class="btn-outline">
           ⌥ GitHub
@@ -986,7 +1002,12 @@
 
 <!-- FOOTER -->
 <footer>
-  <span>mdmehedee.me</span> · Built with passion by Md. Mehedee Hasan · 2026
+  <div><span>mdmehedee.me</span> · Built with passion by Md. Mehedee Hasan · 2026</div>
+  <div class="footer-links">
+    <a href="/blog.html">Blog</a>
+    <a href="/privacy.html">Privacy Policy</a>
+    <a href="/disclosure.html">Affiliate Disclosure</a>
+  </div>
 </footer>
 
 <script>
