@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixing Common Timeout Errors in Vercel for AI Apps | Md. Mehedee Hasan</title>
+  <meta name="description" content="Learn how to fix 504 Gateway Timeout and 10-second serverless function limits in Vercel when building LangChain and OpenAI streaming apps.">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f; --surface: #111118; --card: #16161f; --border: #2a2a3a;
+      --accent: #00e5ff; --accent2: #7c3aed; --text: #e8e8f0; --muted: #94a3b8;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; line-height: 1.8; padding: 48px 20px; }
+    article { max-width: 820px; margin: 0 auto; }
+    .nav-back { display: inline-block; font-family: 'Space Mono', monospace; font-size: 13px; color: var(--accent); text-decoration: none; margin-bottom: 24px; }
+    .meta { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+    h1 { font-family: 'Syne', sans-serif; font-size: clamp(28px, 5vw, 42px); line-height: 1.15; margin-bottom: 24px; }
+    h2 { font-family: 'Syne', sans-serif; font-size: 1.45rem; color: var(--accent); margin: 36px 0 14px; }
+    p { color: #cbd5e1; margin-bottom: 16px; font-size: 16px; }
+    ul, ol { color: #cbd5e1; padding-left: 22px; margin-bottom: 18px; }
+    li { margin-bottom: 8px; }
+    pre { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; overflow-x: auto; margin: 18px 0 24px; }
+    code { font-family: 'Space Mono', monospace; font-size: 13px; color: #38bdf8; }
+    p code, li code { background: rgba(0,229,255,0.08); padding: 2px 6px; border-radius: 4px; }
+    .callout { background: var(--card); border-left: 3px solid var(--accent); padding: 18px 20px; border-radius: 8px; margin: 24px 0; }
+    footer { max-width: 820px; margin: 60px auto 0; padding-top: 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); }
+    footer a { color: var(--accent); text-decoration: none; margin-left: 14px; }
+  </style>
+</head>
+<body>
+  <article>
+    <a href="/blog.html" class="nav-back">&larr; Back to All Posts</a>
+    <div class="meta">November 2026 · 5 min read · Vercel · LangChain · Serverless</div>
+    <h1>Fixing Common Timeout Errors in Vercel for AI & LangChain Apps</h1>
+
+    <p>Deploying an AI chatbot or RAG endpoint on Vercel feels effortless—until your LLM call takes 12 seconds and production suddenly returns <code>504: FUNCTION_INVOCATION_TIMEOUT</code>.</p>
+    <p>Standard serverless functions are designed for fast database queries, not multi-step LangChain agents or long GPT completions. Below are four practical ways to eliminate timeout errors without rewriting your entire app.</p>
+
+    <h2>1. Switch From Buffered Responses to Streaming</h2>
+    <p>By default, waiting for an entire LLM completion before sending HTTP bytes forces the serverless function to block until the very last token finishes. Streaming sends the first token in under 1–2 seconds and keeps the HTTP connection alive while tokens arrive.</p>
+    <p>In Next.js App Router, return a <code>ReadableStream</code> directly from your Route Handler:</p>
+<pre><code>import { ChatOpenAI } from "@langchain/openai";
+
+export const runtime = "edge";
+
+export async function POST(req) {
+  const { prompt } = await req.json();
+
+  const model = new ChatOpenAI({
+    modelName: "gpt-4o-mini",
+    streaming: true,
+  });
+
+  const stream = await model.stream(prompt);
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      for await (const chunk of stream) {
+        controller.enqueue(encoder.encode(chunk.content));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}</code></pre>
+
+    <h2>2. Increase <code>maxDuration</code> Explicitly</h2>
+    <p>Vercel defaults serverless endpoints to conservative timeout thresholds unless you declare a higher limit per route. Export <code>maxDuration</code> at the top of your API route file:</p>
+<pre><code>// app/api/chat/route.js
+export const maxDuration = 60; // seconds (up to plan limit)
+
+export async function POST(req) {
+  // Your LangChain or vector retrieval logic here
+}</code></pre>
+
+    <div class="callout">
+      <strong>Plan Check:</strong> On Vercel Hobby plans, streaming + Edge runtime or configuring <code>maxDuration</code> up to the Hobby cap (60s with Fluid Compute enabled) prevents most single-turn LLM timeouts. For Pro teams, you can extend this up to 300 seconds.
+    </div>
+
+    <h2>3. Use the Edge Runtime for Lightweight Proxy Calls</h2>
+    <p>If your route only calls OpenAI, Gemini, or Pinecone over HTTP without heavy native Node.js binaries, adding <code>export const runtime = "edge";</code> removes cold starts and lets streaming responses continue past initial connection limits—as long as the first byte is sent within 25 seconds.</p>
+    <ul>
+      <li><strong>Use Edge Runtime when:</strong> You are streaming directly from OpenAI, Anthropic, or Gemini APIs.</li>
+      <li><strong>Stick to Node.js Runtime when:</strong> You rely on Python child processes, PDF parsing buffers, or local file system access.</li>
+    </ul>
+
+    <h2>4. Offload Heavy RAG Indexing to AWS or Background Queues</h2>
+    <p>PDF chunking, embedding generation, and vector upserts should never run synchronously inside a Vercel API request. If a user uploads a 50-page PDF, split the architecture cleanly:</p>
+    <ol>
+      <li>Upload the document directly from the browser to <strong>Amazon S3</strong> using a pre-signed URL.</li>
+      <li>Trigger an asynchronous worker on <strong>AWS EC2</strong>, <strong>AWS Lambda</strong>, or a queue service (like Upstash QStash) to chunk and embed the file into ChromaDB or Pinecone.</li>
+      <li>Poll a lightweight status endpoint from the frontend until indexing completes.</li>
+    </ol>
+
+    <h2>Quick Troubleshooting Checklist</h2>
+    <ul>
+      <li>Check whether your LangChain chain makes sequential LLM calls—combine prompts or run retrievals in parallel using <code>Promise.all()</code>.</li>
+      <li>Limit vector search <code>top_k</code> results (e.g., 3–5 chunks) so input token count stays fast and predictable.</li>
+      <li>Inspect real-time execution time inside the <strong>Vercel Dashboard → Logs</strong> tab to isolate whether latency comes from cold starts, vector DB queries, or the LLM provider.</li>
+    </ul>
+  </article>
+
+  <footer>
+    <div>Written by Md. Mehedee Hasan · mdmehedee.me</div>
+    <div>
+      <a href="/">Portfolio</a>
+      <a href="/blog.html">Blog</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/disclosure.html">Disclosure</a>
+    </div>
+  </footer>
+</body>
+</html>
