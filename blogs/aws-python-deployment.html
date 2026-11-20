@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to Deploy a Python RAG Pipeline on AWS EC2 | Md. Mehedee Hasan</title>
+  <meta name="description" content="Step-by-step guide to deploying a Python LangChain and ChromaDB RAG application on AWS EC2 with FastAPI, systemd, and Nginx.">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f; --surface: #111118; --card: #16161f; --border: #2a2a3a;
+      --accent: #00e5ff; --accent2: #7c3aed; --text: #e8e8f0; --muted: #94a3b8;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; line-height: 1.8; padding: 48px 20px; }
+    article { max-width: 820px; margin: 0 auto; }
+    .nav-back { display: inline-block; font-family: 'Space Mono', monospace; font-size: 13px; color: var(--accent); text-decoration: none; margin-bottom: 24px; }
+    .meta { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+    h1 { font-family: 'Syne', sans-serif; font-size: clamp(28px, 5vw, 42px); line-height: 1.15; margin-bottom: 24px; }
+    h2 { font-family: 'Syne', sans-serif; font-size: 1.45rem; color: var(--accent); margin: 36px 0 14px; }
+    p { color: #cbd5e1; margin-bottom: 16px; font-size: 16px; }
+    ul, ol { color: #cbd5e1; padding-left: 22px; margin-bottom: 18px; }
+    li { margin-bottom: 8px; }
+    pre { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; overflow-x: auto; margin: 18px 0 24px; }
+    code { font-family: 'Space Mono', monospace; font-size: 13px; color: #38bdf8; }
+    p code, li code { background: rgba(0,229,255,0.08); padding: 2px 6px; border-radius: 4px; }
+    .callout { background: var(--card); border-left: 3px solid var(--accent); padding: 18px 20px; border-radius: 8px; margin: 24px 0; }
+    footer { max-width: 820px; margin: 60px auto 0; padding-top: 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); }
+    footer a { color: var(--accent); text-decoration: none; margin-left: 14px; }
+  </style>
+</head>
+<body>
+  <article>
+    <a href="/blog.html" class="nav-back">&larr; Back to All Posts</a>
+    <div class="meta">November 2026 · 6 min read · AWS · Python · LangChain</div>
+    <h1>How to Deploy a Python RAG Pipeline on AWS EC2 (Production Guide)</h1>
+
+    <p>Building a Retrieval-Augmented Generation (RAG) chatbot locally with Python, LangChain, and ChromaDB is straightforward. Moving it from <code>localhost</code> to a reliable cloud server that stays online 24/7 is where many developers hit configuration walls.</p>
+    <p>In this guide, you will deploy a FastAPI-powered Python RAG backend onto an <strong>AWS EC2 Ubuntu instance</strong>, keep it running continuously with <code>systemd</code>, and expose it cleanly through an Nginx reverse proxy.</p>
+
+    <h2>1. Launch and Configure Your AWS EC2 Instance</h2>
+    <p>Start by launching an Ubuntu Server 24.04 LTS instance in the AWS Console. For lightweight RAG prototypes using OpenAI embeddings and a small ChromaDB store, a <code>t3.small</code> (2 GB RAM) or <code>t3.medium</code> instance is recommended—a 1 GB Free Tier instance often runs out of memory when installing ML dependencies.</p>
+    <ul>
+      <li><strong>Region:</strong> Choose <code>us-east-1</code> (N. Virginia) for lowest latency to OpenAI APIs and US users.</li>
+      <li><strong>Security Group Inbound Rules:</strong> Allow SSH (port 22) from your IP, HTTP (port 80), and HTTPS (port 443) from anywhere.</li>
+    </ul>
+
+    <h2>2. Install Python and Clone Your RAG Project</h2>
+    <p>Connect to your server via SSH, update packages, and create an isolated virtual environment:</p>
+<pre><code>ssh -i your-key.pem ubuntu@YOUR_EC2_PUBLIC_IP
+
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-pip python3-venv nginx git
+
+git clone https://github.com/your-username/your-rag-app.git
+cd your-rag-app
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt</code></pre>
+
+    <div class="callout">
+      <strong>Memory Tip:</strong> If <code>pip install</code> gets killed on a low-RAM server, add the <code>--no-cache-dir</code> flag or configure a 2 GB swap file before installing packages like <code>chromadb</code> or <code>langchain</code>.
+    </div>
+
+    <h2>3. Store API Keys Securely with Environment Variables</h2>
+    <p>Never hardcode your OpenAI or Pinecone keys inside Python files. Create a <code>.env</code> file in your project root and restrict its permissions:</p>
+<pre><code>cat &lt;&lt;EOF &gt; .env
+OPENAI_API_KEY=sk-your-actual-key-here
+CHROMA_PERSIST_DIR=./chroma_db
+EOF
+
+chmod 600 .env</code></pre>
+
+    <h2>4. Run FastAPI in the Background with systemd</h2>
+    <p>If you launch <code>uvicorn</code> manually in your terminal, the server stops the moment you close SSH. Instead, create a <code>systemd</code> service so Ubuntu automatically restarts your RAG API on crashes or reboots:</p>
+<pre><code>sudo nano /etc/systemd/system/rag-api.service</code></pre>
+
+    <p>Paste the following configuration (update paths to match your folder name):</p>
+<pre><code>[Unit]
+Description=FastAPI Python RAG Service
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/your-rag-app
+EnvironmentFile=/home/ubuntu/your-rag-app/.env
+ExecStart=/home/ubuntu/your-rag-app/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+    <p>Enable and start the service:</p>
+<pre><code>sudo systemctl daemon-reload
+sudo systemctl enable rag-api
+sudo systemctl start rag-api
+sudo systemctl status rag-api</code></pre>
+
+    <h2>5. Configure Nginx as a Reverse Proxy</h2>
+    <p>Bind Nginx to port 80 and forward traffic to your local Uvicorn process on port 8000:</p>
+<pre><code>sudo nano /etc/nginx/sites-available/rag-api</code></pre>
+
+<pre><code>server {
+    listen 80;
+    server_name yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
+}</code></pre>
+
+    <p>Notice <code>proxy_read_timeout 120s;</code>—LLM completions often take longer than standard web requests, and raising this timeout prevents frustrating <code>504 Gateway Timeout</code> errors.</p>
+<pre><code>sudo ln -s /etc/nginx/sites-available/rag-api /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx</code></pre>
+
+    <h2>6. Add Free HTTPS with Certbot</h2>
+    <p>Once your domain's DNS <code>A</code> record points to your EC2 public IP, enable SSL in one command:</p>
+<pre><code>sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d yourdomain.com</code></pre>
+
+    <h2>Next Steps for Production</h2>
+    <p>Your Python RAG pipeline is now live over HTTPS. Before scaling to heavy traffic, consider setting up AWS CloudWatch alarms for CPU/RAM spikes, backing up your ChromaDB vector directory to Amazon S3, and adding rate limiting in Nginx to protect your OpenAI API budget.</p>
+  </article>
+
+  <footer>
+    <div>Written by Md. Mehedee Hasan · mdmehedee.me</div>
+    <div>
+      <a href="/">Portfolio</a>
+      <a href="/blog.html">Blog</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/disclosure.html">Disclosure</a>
+    </div>
+  </footer>
+</body>
+</html>
